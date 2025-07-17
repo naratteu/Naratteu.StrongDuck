@@ -26,7 +26,7 @@ public class DuckTypeGenerator : IIncrementalGenerator
                 if (s is not { TargetSymbol: INamedTypeSymbol ITarget }) continue;
                 var lines = Lines("""
                 namespace Naratteu.StrongDuck { partial class Debug { } }
-                """).Concat(Lines(ITarget.ContainingNamespace is { } ns ? $$"""
+                """).Concat(Lines(ITarget.ContainingNamespace is { IsGlobalNamespace: not true } ns ? $$"""
                 namespace {{ns}}
                 {
                     //<inner>

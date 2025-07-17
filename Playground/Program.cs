@@ -1,6 +1,5 @@
 ﻿using Naratteu.StrongDuck;
 using System.Text.Encodings.Web;
-using Playground;
 
 IDuck[] ducks = [
     new Chick().ToDuck<IDuck>(),
@@ -16,17 +15,14 @@ Console.WriteLine(new string('-', 10));
 foreach (var c in ducks) Console.WriteLine(c.Flap());
 Console.WriteLine(new string('-', 10));
 
-namespace Playground
+[Duck(typeof(Chick))]
+[Duck(typeof(Dog<int>))]
+[Duck(typeof(WhatThe.Fox))]
+[Duck(typeof(HtmlEncoder))]
+interface IDuck
 {
-    [Duck(typeof(Chick))]
-    [Duck(typeof(Dog<int>))]
-    [Duck(typeof(WhatThe.Fox))]
-    [Duck(typeof(HtmlEncoder))]
-    interface IDuck
-    {
-        string Quack();
-        string Flap();
-    }
+    string Quack();
+    string Flap();
 }
 
 class Chick
