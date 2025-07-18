@@ -1,0 +1,15 @@
+on:
+  push:
+    branches: [ main ]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: "9.0.x"
+    - run: |
+        cd ./Naratteu.StrongDuck
+        dotnet pack -c Release -o ./pack
+        dotnet nuget push ./pack/*.nupkg --skip-duplicate --api-key "${{secrets.NU_TOKEN}}" --source "https://api.nuget.org/v3/index.json"
