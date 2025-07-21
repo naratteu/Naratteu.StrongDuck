@@ -1,6 +1,6 @@
 on:
   push:
-    branches: [ main ]
+    tags: [ '*' ]
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -8,8 +8,8 @@ jobs:
     - uses: actions/checkout@v4
     - uses: actions/setup-dotnet@v4
       with:
-        dotnet-version: "9.0.x"
+        dotnet-version: 9.0.x
     - run: |
         cd ./Naratteu.StrongDuck
-        dotnet pack -c Release -o ./pack
-        dotnet nuget push ./pack/*.nupkg --skip-duplicate --api-key "${{secrets.NU_TOKEN}}" --source "https://api.nuget.org/v3/index.json"
+        dotnet pack -c Release -o ./pack -p:Version=${GITHUB_REF##refs/tags/v}
+        dotnet nuget push ./pack/*.nupkg --api-key "${{secrets.NU_TOKEN}}"
