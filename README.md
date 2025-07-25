@@ -18,7 +18,9 @@ interface IDuck
 }
 ```
 
-위 코드만 입력하면, `A`와 `B`에 선언된 `public string Quack()` 과 `public string Flap()` 함수를 `IDuck`의 맴버와 직결하는 `class`를 생성합니다. 만일 대응하는 함수가 없다면, 확장함수로 선언하면 됩니다.
+위 코드만 입력하면, `A`와 `B`에 선언된 `public string Quack()` 과 `public string Flap()` 함수를 `IDuck`의 맴버와 직결하는 `class`를 생성합니다.
+
+만일 대응하는 함수가 없다면 컴파일에러가 발생하며, 코드수정이 불가한 타입일경우 확장함수를 덧붙이는것으로 해결합니다.
 
 ```cs
 IDuck[] ducks = [
