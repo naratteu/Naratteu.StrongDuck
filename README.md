@@ -20,6 +20,16 @@ interface IDuck
 
 위 코드만 입력하면, `A`와 `B`에 선언된 `public string Quack()` 과 `public string Flap()` 함수를 `IDuck`의 맴버와 직결하는 `class`를 생성합니다. 만일 대응하는 함수가 없다면, 확장함수로 선언하면 됩니다.
 
+```cs
+IDuck[] ducks = [
+    new A().ToDuck<IDuck>(),
+    new B().ToDuck<IDuck>(),
+    ..
+];
+```
+
+이후, 위와같이 관계없는 타입을 동일타입으로 변환해 취급할수 있게됩니다.
+
 ## Todo
 
 - Support Property, Indexer, etc..
