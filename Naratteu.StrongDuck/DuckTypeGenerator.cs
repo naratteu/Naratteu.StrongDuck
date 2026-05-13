@@ -10,14 +10,19 @@ public class DuckTypeGenerator : IIncrementalGenerator
 {
     void IIncrementalGenerator.Initialize(IncrementalGeneratorInitializationContext context)
     {
-        context.RegisterPostInitializationOutput(ctx => ctx.AddSource("DuckAttribute.g.cs", SourceText.From("""
-        using System;
-        namespace Naratteu.StrongDuck
+        context.RegisterPostInitializationOutput(ctx =>
         {
-            [AttributeUsage(AttributeTargets.Interface, AllowMultiple = true)]
-            public class DuckAttribute(Type type) : Attribute { }
-        }
-        """, Encoding.UTF8)));
+            ctx.AddEmbeddedAttributeDefinition();
+            ctx.AddSource("DuckAttribute.g.cs", """
+            using System;
+            namespace Naratteu.StrongDuck
+            {
+                [Microsoft.CodeAnalysis.Embedded]
+                [AttributeUsage(AttributeTargets.Interface, AllowMultiple = true)]
+                public class DuckAttribute(Type type) : Attribute { }
+            }
+            """);
+        });
         var attr = context.SyntaxProvider.ForAttributeWithMetadataName("Naratteu.StrongDuck.DuckAttribute", (_, _) => true, (c, _) => c);
         context.RegisterSourceOutput(attr.Collect(), (spc, sources) =>
         {
