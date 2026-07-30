@@ -38,3 +38,7 @@ IDuck[] ducks = [
 ## Todo
 
 - Support Property, Indexer, etc..
+
+## See Also
+
+- https://docs.elementscompiler.com/Concepts/DuckTyping/
