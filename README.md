@@ -81,6 +81,45 @@ IDuck b = obj.ToDuck<IDuck>();    // 그 아래에서도 된다
 | `DUCK004` | 익명 형식·`dynamic` 처럼 이름으로 가리킬 수 없는 타입 |
 | `DUCK005` | 연산자·비공개 멤버라 옮길 수 없음 |
 
+### 익명객체는 안 됩니다
+
+```cs
+IDuck d = IDuck.From(new { Quack = "꽥" });   // DUCK004
+```
+
+익명형식은 소스에서 **이름으로 가리킬 수 없어서**, 감싸는 클래스의 필드 타입을 적을 수가
+없습니다. 제네릭으로 담는 것(`From<T>(T obj)`)까지는 되지만, 그 `T` 위에서 멤버에 손댈
+방법이 없습니다 — C# 에 구조적 제약이 없으니까요.
+
+리플렉션 없이 뚫어보려고 `[UnsafeAccessor]` 도 찔러봤습니다. (.NET 10 기준)
+
+| 시도 | 결과 |
+| --- | --- |
+| 수신자를 `T` 로 — `Acc<T>.Get(T obj)` | `BadImageFormatException: Invalid usage of UnsafeAccessorAttribute` |
+| 메서드 제네릭 — `GetI<T>(T obj)` | 동일 |
+| ``[UnsafeAccessorType("<>f__AnonymousType0`1[..], asm")]`` | 타입은 풀리지만 게터 시그니처가 `int get_i()` 가 아니라 `<i>j__TPar get_i()` 라 `MissingMethodException` |
+
+마지막 건 더 맞춰보면 뚫릴 여지가 있어 보이지만 어차피 못 씁니다. `AnonymousType0` 의 그
+**서수를 생성기가 알 수 없기 때문**입니다. 저 번호는 Roslyn 이 emit 단계에서 컴파일 전체를
+훑으며 발견 순서대로 매기는 거라, 그보다 먼저 도는 소스제너레이터는 예측할 수 없습니다.
+생성기가 코드를 한 줄 얹는 순간 번호가 밀릴 수도 있고요.
+
+대신 [Naratteu.Anonymous](https://github.com/naratteu/Naratteu.Anonymous) 가 **괄호 두 개
+차이**로 같은 일을 합니다.
+
+```cs
+ii i = ii.New(new() { i = 1 });   // new { } 가 아니라 new() { }
+
+interface ii { int i { get; } }
+```
+
+익명형식이 아니라 생성기가 만든 명명 타입에 대한 대상타입추론이라, 컴파일타임에 전부
+확정됩니다. 리플렉션 0, AOT 호환, 멤버를 빠뜨리면 `required` 가 컴파일에러로 잡습니다.
+
+경계는 이렇습니다 — **이미 있는 객체**를 인터페이스로 보는 건 StrongDuck 이고,
+**그 자리에서 만들어** 인터페이스로 내놓는 건 Anonymous 입니다. 익명객체는 "이미 있는
+객체" 처럼 생겼지만 이름이 없어서 전자에 못 들어가고, 후자가 그 자리를 대신합니다.
+
 ## 2.0 에서 바뀐 것
 
 - **`[Duck(typeof(..))]` 를 걷어냈습니다.** 호출지점 스캔이 대신합니다. (breaking)
@@ -94,4 +133,4 @@ IDuck b = obj.ToDuck<IDuck>();    // 그 아래에서도 된다
 ## See Also
 
 - https://docs.elementscompiler.com/Concepts/DuckTyping/
-- [Naratteu.Anonymous](https://github.com/naratteu/Naratteu.Anonymous) — 같은 수법으로 인터페이스를 그 자리에서 구현하게 해주는 자매품
+- [Naratteu.Anonymous](https://github.com/naratteu/Naratteu.Anonymous) — 같은 수법으로 인터페이스를 그 자리에서 구현하게 해주는 자매품. [익명객체는 안 됩니다](#익명객체는-안-됩니다) 참고

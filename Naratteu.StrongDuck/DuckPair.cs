@@ -26,7 +26,7 @@ static class WrapperBuilder
     {
         if (source.TypeKind is TypeKind.Dynamic || source.IsAnonymousType || !source.CanBeReferencedByName)
         {
-            diags.Add(new(Diags.CannotWrap.Id, source.Fq(), "", at));
+            diags.Add(new(Diags.CannotWrap.Id, source.ToDisplayString(Formats.Short), "", at));
             return null;
         }
 
