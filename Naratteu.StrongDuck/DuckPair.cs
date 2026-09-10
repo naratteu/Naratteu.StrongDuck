@@ -7,6 +7,7 @@ sealed record DuckPair(
     string Target,                  // global::Zoo.IDuck
     string Source,                  // global::Zoo.Chick
     string Wrapper,                 // __Duck_Zoo_IDuck__Zoo_Chick
+    EquatableArray<string> Usings,  // 확장 프로퍼티처럼 정적호출 문법이 없는 것들 때문에 필요한 using
     EquatableArray<string> Body);   // 명시적 인터페이스 구현문들
 
 /// <summary>호출지점 하나에서 뽑아낸 것.</summary>
@@ -30,6 +31,7 @@ static class WrapperBuilder
         }
 
         List<string> body = [];
+        SortedSet<string> usings = [];
         var faces = new List<INamedTypeSymbol>(target.AllInterfaces.Length + 1) { target };
         faces.AddRange(target.AllInterfaces);
 
@@ -46,7 +48,7 @@ static class WrapperBuilder
                     continue;
                 }
 
-                if (Forward(m, face, source, model, pos) is { } line) body.Add(line);
+                if (Forward(m, face, source, model, pos, usings) is { } line) body.Add(line);
                 else
                 {
                     diags.Add(new(Diags.NoMatchingMember.Id, source.ToDisplayString(Formats.Short), $"{face.ToDisplayString(Formats.Short)}.{m.Name}", at));
@@ -54,7 +56,7 @@ static class WrapperBuilder
                 }
             }
 
-        return new(target.Fq(), source.Fq(), Name(target, source), body.ToEquatable());
+        return new(target.Fq(), source.Fq(), Name(target, source), usings.ToEquatable(), body.ToEquatable());
     }
 
     public static string Name(ITypeSymbol target, ITypeSymbol source) => $"__Duck_{Id(target)}__{Id(source)}";
@@ -65,7 +67,7 @@ static class WrapperBuilder
 
     // ===== 멤버 잇기 =====
 
-    static string? Forward(ISymbol m, INamedTypeSymbol face, ITypeSymbol source, SemanticModel model, int pos)
+    static string? Forward(ISymbol m, INamedTypeSymbol face, ITypeSymbol source, SemanticModel model, int pos, SortedSet<string> usings)
     {
         var f = face.Fq();
         switch (m)
@@ -80,26 +82,61 @@ static class WrapperBuilder
 
             case IPropertySymbol { IsIndexer: true } x:
             {
-                if (!Indexers(source).Any(p => Same(p.Parameters, x.Parameters, model) && Assignable(p.Type, x.Type, model))) return null;
+                if (Indexers(source).FirstOrDefault(p => Same(p.Parameters, x.Parameters, model) && Fits(p, x, model)) is not { } ix) return null;
+                Import(ix, source, usings);
                 return $"{x.Type.Fq()} {f}.this[{Parms(x.Parameters)}] {{ {Accessors(x, $"t[{Args(x.Parameters)}]")} }}";
             }
 
             case IPropertySymbol x:
             {
                 var recv = x.IsStatic ? source.Fq() : "t";
-                if (Members(source, model, pos, x.Name).OfType<IPropertySymbol>().FirstOrDefault(p => p.IsStatic == x.IsStatic) is null) return null;
+                if (Members(source, model, pos, x.Name).FirstOrDefault(c => Fits(c, x, model)) is not { } got) return null;
+                Import(got, source, usings);
                 return $"{(x.IsStatic ? "static " : "")}{x.Type.Fq()} {f}.{x.Name.Esc()} {{ {Accessors(x, $"{recv}.{x.Name.Esc()}")} }}";
             }
 
             case IEventSymbol x:
             {
                 var recv = x.IsStatic ? source.Fq() : "t";
-                if (Members(source, model, pos, x.Name).OfType<IEventSymbol>().FirstOrDefault() is null) return null;
+                if (Members(source, model, pos, x.Name).OfType<IEventSymbol>()
+                        .FirstOrDefault(e => e.IsStatic == x.IsStatic && SymbolEqualityComparer.Default.Equals(e.Type, x.Type)) is not { } ev) return null;
+                Import(ev, source, usings);
                 return $"{(x.IsStatic ? "static " : "")}event {x.Type.Fq()} {f}.{x.Name.Esc()} {{ add => {recv}.{x.Name.Esc()} += value; remove => {recv}.{x.Name.Esc()} -= value; }}";
             }
 
             default: return null;
         }
+    }
+
+    /// <summary>소스의 멤버가 인터페이스의 프로퍼티/인덱서를 받아줄 수 있는지. 필드도 받는다.</summary>
+    static bool Fits(ISymbol got, IPropertySymbol want, SemanticModel model) => got switch
+    {
+        IPropertySymbol p => p.IsStatic == want.IsStatic
+            && (want.GetMethod is null || p.GetMethod is not null && Assignable(p.Type, want.Type, model))
+            && (want.SetMethod is null || p.SetMethod is not null && Assignable(want.Type, p.Type, model)),
+
+        // C# 인터페이스는 필드를 못 담으니, 소스가 필드로 갖고 있으면 그걸로 잇는게 맞다
+        IFieldSymbol f => f.IsStatic == want.IsStatic
+            && (want.GetMethod is null || Assignable(f.Type, want.Type, model))
+            && (want.SetMethod is null || !f.IsReadOnly && !f.IsConst && Assignable(want.Type, f.Type, model)),
+
+        _ => false,
+    };
+
+    /// <summary>확장멤버로 찾아졌으면, 확장 프로퍼티처럼 정적호출 문법이 없는 것도 있으니 그 네임스페이스를 생성파일에 들여온다.</summary>
+    static void Import(ISymbol got, ITypeSymbol source, SortedSet<string> usings)
+    {
+        if (IsOwn(source, got.ContainingType)) return;
+        var outer = got.ContainingType;
+        while (outer?.ContainingType is { } up) outer = up;
+        if (outer?.ContainingNamespace is { IsGlobalNamespace: false } ns) usings.Add(ns.ToDisplayString());
+    }
+
+    static bool IsOwn(ITypeSymbol source, INamedTypeSymbol? owner)
+    {
+        for (var t = source; t is not null; t = t.BaseType)
+            if (SymbolEqualityComparer.Default.Equals(t, owner)) return true;
+        return source.AllInterfaces.Any(i => SymbolEqualityComparer.Default.Equals(i, owner));
     }
 
     /// <summary>인덱서는 이름으로 조회되지 않으니 타입을 직접 훑는다.</summary>

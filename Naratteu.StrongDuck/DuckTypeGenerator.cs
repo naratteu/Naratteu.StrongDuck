@@ -106,7 +106,7 @@ public class DuckTypeGenerator : IIncrementalGenerator
         #nullable enable
         namespace Naratteu.StrongDuck.Generated
         {
-            internal sealed class {{p.Wrapper}} : {{p.Target}}
+        {{p.Usings.Select(u => $"    using {u};\n").Concat([""]).Join("")}}    internal sealed class {{p.Wrapper}} : {{p.Target}}
             {
                 private readonly {{p.Source}} t;
                 public {{p.Wrapper}}({{p.Source}} t) => this.t = t;

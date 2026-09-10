@@ -117,6 +117,60 @@ public class DuckTypeGeneratorTests
         await test.RunAsync();
     }
 
+    /// <summary>C# 인터페이스는 필드를 못 담으니, 소스가 필드로 갖고 있으면 그걸로 잇는다.</summary>
+    [Fact]
+    public async Task FillsPropertyWithField()
+    {
+        var test = Test(/*lang=C#*/"""
+            interface IName { string Name { get; } }
+            class Src { public string Name = "필드"; }
+
+            class Use { static IName A() => IName.From(new Src()); }
+            """);
+        test.TestBehaviors = TestBehaviors.SkipGeneratedSourcesCheck;
+
+        await test.RunAsync();
+    }
+
+    /// <summary>확장 프로퍼티로도 메꿀 수 있다. 정적호출 문법이 없으니 그 네임스페이스를 생성파일에 들여온다.</summary>
+    [Fact]
+    public async Task FillsPropertyWithExtensionProperty()
+    {
+        var test = Test(/*lang=C#*/"""
+            using Fill;
+
+            interface IName { string Name { get; } }
+            class Src { }
+
+            namespace Fill
+            {
+                static class SrcExtensions { extension(Src s) { public string Name => "확장"; } }
+            }
+
+            class Use { static IName A() => IName.From(new Src()); }
+            """);
+        test.TestBehaviors = TestBehaviors.SkipGeneratedSourcesCheck;
+
+        await test.RunAsync();
+    }
+
+    /// <summary>타입이나 접근자가 안 맞으면 생성코드가 아니라 호출지점에서 잡아준다.</summary>
+    [Theory]
+    [InlineData(/*lang=C#*/"class Src { public int Name => 3; }")]              // 타입 불일치
+    [InlineData(/*lang=C#*/"class Src { public string Name => \"읽기만\"; }")]  // set 없음
+    public async Task ReportsPropertyMismatchAtCallSite(string src)
+    {
+        var test = Test($$"""
+            interface IName { string Name { get; set; } }
+            {{src}}
+
+            class Use { static IName A() => IName.{|DUCK002:From|}(new Src()); }
+            """);
+        test.TestBehaviors = TestBehaviors.SkipGeneratedSourcesCheck;
+
+        await test.RunAsync();
+    }
+
     static CSharpSourceGeneratorTest<DuckTypeGenerator, DefaultVerifier> Test([StringSyntax("C#")] string code)
     {
         var test = new CSharpSourceGeneratorTest<DuckTypeGenerator, DefaultVerifier> { TestCode = code };
