@@ -1,90 +1,136 @@
-using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.Text;
-using System.Diagnostics.CodeAnalysis;
+using System.Collections.Immutable;
 using System.Text;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Text;
 
 namespace Naratteu.StrongDuck;
 
+/// <summary>
+/// <c>IDuck.From(obj)</c> / <c>obj.ToDuck&lt;IDuck&gt;()</c> 호출지점을 보고,
+/// 그 인터페이스를 그 타입으로 이어붙인 래퍼와 진입점을 만들어낸다.
+/// 어떤 타입을 덕타이핑할지는 호출지점이 이미 말해주므로 따로 선언할 게 없다.
+/// </summary>
 [Generator]
 public class DuckTypeGenerator : IIncrementalGenerator
 {
     void IIncrementalGenerator.Initialize(IncrementalGeneratorInitializationContext context)
     {
-        context.RegisterPostInitializationOutput(ctx =>
-        {
-            ctx.AddEmbeddedAttributeDefinition();
-            ctx.AddSource("DuckAttribute.g.cs", """
-            using System;
-            namespace Naratteu.StrongDuck
-            {
-                [Microsoft.CodeAnalysis.Embedded]
-                [AttributeUsage(AttributeTargets.Interface, AllowMultiple = true)]
-                public class DuckAttribute(Type type) : Attribute { }
-            }
-            """);
-        });
-        var attr = context.SyntaxProvider.ForAttributeWithMetadataName("Naratteu.StrongDuck.DuckAttribute", (_, _) => true, (c, _) => c);
-        context.RegisterSourceOutput(attr.Collect(), (spc, sources) =>
-        {
-            foreach (var s in sources)
-            {
-                if (s is not { TargetSymbol: INamedTypeSymbol ITarget }) continue;
-                var lines = Lines("""
-                namespace Naratteu.StrongDuck { partial class Debug { } }
-                """).Concat(Lines(ITarget.ContainingNamespace is { IsGlobalNamespace: not true } ns ? $$"""
-                namespace {{ns}}
-                {
-                    //<inner>
-                }
-                """ : """
-                //<inner>
-                """)).Inject("//<inner>", Lines($$"""
-                public static class {{ITarget.Name}}DuckExtensions
-                {
-                    //<inner>
-                }
-                """)).Inject("//<inner>", s.Attributes.SelectMany(attr => attr switch
-                {
-                    { ConstructorArguments: [TypedConstant { Value: INamedTypeSymbol type }] }
-                        when Sanitize(type) is { } Target => Lines($$"""
-                        internal static {{ITarget}} ToDuck<_>(this {{type}} t) where _ : {{ITarget}} => new {{Target}}Duck(t);
-                        class {{Target}}Duck({{type}} t) : {{ITarget}}
-                        {
-                            //<inner>
-                        }
-                        """).Inject("//<inner>", ITarget.GetMembers().SelectMany(mem => mem switch
-                        {
-                            IMethodSymbol { ReturnType: { } r, Name: { } n, Parameters: { } p } => Lines($"""
-                            {r} {ITarget}.{n}({string.Join(", ", p)}) => t.{n}({string.Join(", ", p.Select(p => p.Name))});
-                            """),
-                            _ => []
-                        })),
-                    _ => []
-                }));
-                spc.AddSource($"{s.TargetSymbol}.g.cs", SourceText.From(string.Join("\r\n", lines), Encoding.UTF8));
+        var csharp14 = context.ParseOptionsProvider.Select((p, _) =>
+            p is CSharpParseOptions cs && cs.LanguageVersion.MapSpecifiedToEffectiveVersion() >= (LanguageVersion)1400);
 
-                static string Sanitize(INamedTypeSymbol nts) => new StringBuilder()
-                    .Append(nts)
-                    .Replace('.', 'ㅇ')
-                    .Replace('<', 'ㅓ')
-                    .Replace('>', 'ㅏ')
-                    .ToString();
-                static IEnumerable<string> Lines(string code) => code.Split(["\r\n", "\n", "\r"], default);
-            }
-        });
+        var calls = context.SyntaxProvider
+            .CreateSyntaxProvider(IsCandidate, Transform)
+            .Where(c => c is not null)
+            .Select((c, _) => c!);
+
+        context.RegisterSourceOutput(calls.Collect().Combine(csharp14), (spc, t) => Emit(spc, t.Left, t.Right));
     }
-}
 
-file static class Exts
-{
-    public static IEnumerable<string> Inject(this IEnumerable<string> lines, string key, IEnumerable<string> replace)
+    static bool IsCandidate(SyntaxNode node, CancellationToken _) =>
+        node is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax ma } inv
+        && (ma.Name.Identifier.Text is "From" && inv.ArgumentList.Arguments.Count is 1
+         || ma.Name.Identifier.Text is "ToDuck" && inv.ArgumentList.Arguments.Count is 0);
+
+    static Call? Transform(GeneratorSyntaxContext ctx, CancellationToken ct)
     {
-        foreach (var line in lines)
+        var inv = (InvocationExpressionSyntax)ctx.Node;
+        var ma = (MemberAccessExpressionSyntax)inv.Expression;
+
+        // 이미 해석되는 호출이면 남의 메서드다
+        if (ctx.SemanticModel.GetSymbolInfo(inv, ct).Symbol is not null) return null;
+
+        var from = ma.Name.Identifier.Text is "From";
+        INamedTypeSymbol? target;
+        ITypeSymbol? source;
+
+        if (from)
         {
-            if (line.Split([key], default) is [var tab, _])
-                foreach (var l in replace)
-                    yield return tab + l;
-            else yield return line;
+            // IDuck.From(obj) — 수신자가 인터페이스 '타입', 인자의 정적타입이 소스
+            target = ctx.SemanticModel.GetSymbolInfo(ma.Expression, ct).Symbol as INamedTypeSymbol;
+            source = ctx.SemanticModel.GetTypeInfo(inv.ArgumentList.Arguments[0].Expression, ct).Type;
         }
+        else
+        {
+            // obj.ToDuck<IDuck>() — 타입인자가 대상, 수신자의 정적타입이 소스
+            if (ma.Name is not GenericNameSyntax { TypeArgumentList.Arguments.Count: 1 } g) return null;
+            target = ctx.SemanticModel.GetSymbolInfo(g.TypeArgumentList.Arguments[0], ct).Symbol as INamedTypeSymbol;
+            source = ctx.SemanticModel.GetTypeInfo(ma.Expression, ct).Type;
+        }
+
+        if (target is null || source is null) return null;
+
+        var at = LocationInfo.From(ma.Name.GetLocation());
+        List<DiagInfo> diags = [];
+
+        if (target.TypeKind is not TypeKind.Interface)
+        {
+            diags.Add(new(Diags.NotAnInterface.Id, target.Fq(), "", at));
+            return new(from, target.Fq(), WrapperBuilder.Holder(target), null, at, diags.ToEquatable());
+        }
+
+        var pair = WrapperBuilder.Build(target, source, ctx.SemanticModel, inv.SpanStart, at, diags);
+        return new(from, target.Fq(), WrapperBuilder.Holder(target), pair, at, diags.ToEquatable());
     }
+
+    static void Emit(SourceProductionContext spc, ImmutableArray<Call> calls, bool csharp14)
+    {
+        foreach (var d in calls.SelectMany(c => c.Diagnostics))
+            spc.ReportDiagnostic(d.ToDiagnostic());
+
+        if (!csharp14)
+            foreach (var c in calls.Where(c => c is { FromForm: true, Pair: not null }))
+                spc.ReportDiagnostic(Diagnostic.Create(Diags.ExtensionNeedsCSharp14, c.At?.ToLocation(), c.Target));
+
+        Dictionary<string, DuckPair> pairs = [];
+        foreach (var c in calls)
+            if (c.Pair is { } p) pairs[p.Wrapper] = p;
+        if (pairs.Count is 0) return;
+
+        foreach (var p in pairs.Values)
+            spc.AddSource($"{p.Wrapper}.g.cs", Src(Wrapper(p)));
+
+        // ToDuck<_> 는 제약만 다르고 시그니처가 같아서, 인터페이스마다 홀더를 따로 둬야 겹치지 않는다
+        foreach (var g in calls.Where(c => c.Pair is not null).GroupBy(c => c.TargetHolder))
+            spc.AddSource($"{g.Key}.g.cs", Src(Entry(
+                g.Key, g.First().Target,
+                [.. g.Select(c => c.Pair!).GroupBy(p => p.Wrapper).Select(x => x.First())],
+                csharp14)));
+    }
+
+    static SourceText Src(string text) => SourceText.From(text, Encoding.UTF8);
+
+    static string Wrapper(DuckPair p) => $$"""
+        // <auto-generated/>
+        #nullable enable
+        namespace Naratteu.StrongDuck.Generated
+        {
+        {{p.Usings.Select(u => $"    using {u};\n").Concat([""]).Join("")}}    internal sealed class {{p.Wrapper}} : {{p.Target}}
+            {
+                private readonly {{p.Source}} t;
+                public {{p.Wrapper}}({{p.Source}} t) => this.t = t;
+
+        {{p.Body.Select(l => $"        {l}").Join("\n")}}
+            }
+        }
+        """;
+
+    static string Entry(string holder, string target, List<DuckPair> pairs, bool csharp14) => $$"""
+        // <auto-generated/>
+        #nullable enable
+
+        /// <summary>{{target}} 의 덕타이핑 진입점.</summary>
+        internal static class {{holder}}
+        {
+        {{(csharp14 ? $$"""
+            extension({{target}})
+            {
+        {{pairs.Select(p => $"        public static {target} From({p.Source} t) => new global::Naratteu.StrongDuck.Generated.{p.Wrapper}(t);").Join("\n")}}
+            }
+
+        """ : "    // From 형태는 C# 14 부터라 이 컴파일에선 만들지 않는다\n")}}
+        {{pairs.Select(p => $"    public static {target} ToDuck<_>(this {p.Source} t) where _ : {target} => new global::Naratteu.StrongDuck.Generated.{p.Wrapper}(t);").Join("\n")}}
+        }
+        """;
 }
