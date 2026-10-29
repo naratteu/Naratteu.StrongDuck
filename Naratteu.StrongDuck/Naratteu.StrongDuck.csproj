@@ -8,10 +8,25 @@
     <LangVersion>latest</LangVersion>
     <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
     <PackageType>Analyzer</PackageType>
+
+    <Description>인터페이스를 그 자리에서 덕타이핑하게 해주는 소스제너레이터</Description>
+    <Authors>naratteu</Authors>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/naratteu/Naratteu.StrongDuck</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/naratteu/Naratteu.StrongDuck</RepositoryUrl>
+    <PackageTags>sourcegenerator;roslyn;ducktyping;interface</PackageTags>
+
+    <!-- 분석기는 소비자 컴파일에 어셈블리를 참조로 들이지 않는다.
+         1.0.x 는 lib/ 에도 dll 이 들어가고 Microsoft.CodeAnalysis.CSharp 의존성이
+         소비자에게 그대로 흘러갔다. -->
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+    <DevelopmentDependency>true</DevelopmentDependency>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" PrivateAssets="all" />
     <PackageReference Include="PolySharp" Version="1.15.0">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
@@ -19,7 +34,8 @@
 
     <AdditionalFiles Include="AnalyzerReleases.Shipped.md" />
     <AdditionalFiles Include="AnalyzerReleases.Unshipped.md" />
-    <None Include="$(OutputPath)$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" />
+    <None Include="..\README.md" Pack="true" PackagePath="" />
+    <None Include="$(OutputPath)$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
   </ItemGroup>
 
 </Project>
