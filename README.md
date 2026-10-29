@@ -6,6 +6,33 @@ DuckTyping SourceGenerator for C#
 
 ![](https://64.media.tumblr.com/6c8b1ca3567c6b1581e8a8ccd5cae1bf/ac794dc23ce58daa-f5/s500x750/ccd5aca19e5785791d428963df7919e7e810e58a.png)
 
+프로젝트 만들 것 없이, 아래를 그대로 터미널에 붙여넣으면 돕니다. (.NET 10 SDK)
+
+```bash
+dotnet run - <<'EOF'
+#:package Naratteu.StrongDuck@2.0.0
+
+// Dispose() 는 있는데 IDisposable 을 안 붙인 남의 타입을 using 에 태운다
+using (IDisposable.From(new Connection()))
+    Console.WriteLine("스코프 안");
+
+// 남의 비교기를 IComparer<T> 로 본다
+IComparer<int> desc = IComparer<int>.From(new Descending());
+List<int> xs = [3, 1, 2];
+xs.Sort(desc);
+Console.WriteLine($"내림차순: {string.Join(",", xs)}");
+
+class Connection { public void Dispose() => Console.WriteLine("연결 닫힘"); }
+class Descending { public int Compare(int a, int b) => b.CompareTo(a); }
+EOF
+```
+
+```
+스코프 안
+연결 닫힘
+내림차순: 3,2,1
+```
+
 ## How to use
 
 선언해둘 게 없습니다. **부르는 자리가 곧 선언**입니다.
